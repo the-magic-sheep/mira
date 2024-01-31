@@ -27,6 +27,6 @@ def test_complex_expr():
     """Test that a complex expr parses"""
     parser = parse.Parser()
     try:
-        parser.consume_expr("(5 ^ -9) + 5 ^ (3 + 2 * 7^2) - 18 * - 47")
+        parser.consume_expr("(5 ^ -9) + 5 ^ (3 + 2 * 7^2) - 18 * -47")
     except pyparsing.exceptions.ParseBaseException:
         assert False
