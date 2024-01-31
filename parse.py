@@ -67,7 +67,14 @@ class Parser:
 
         self.expr <<= self.term + pp.ZeroOrMore(self.op_prec[-3] + self.term)
         self.expr.add_parse_action(self.consume_expr)
-        self.prog = pp.ZeroOrMore(self.expr)
+
+        self.var_def = self.ident + ":" + self.ident + "=" + self.expr
+        self.var_def.add_parse_action(self.consume_var_def)
+
+        self.var_set = self.ident + "=" + self.expr
+        self.var_set.add_parse_action(self.consume_var_set)
+
+        self.prog = self.var_def | self.var_set | self.expr
 
         self.ast: list[dict[str, Any]] = []
 
@@ -197,8 +204,44 @@ class Parser:
 
         return new_ast
 
+    def consume_var_def(
+        self,
+        input_str: str,
+        column: int = 0,
+        parse_result: pp.ParseResults | None = None,
+    ):
+        """Parse a given string for a variable definition."""
+        if parse_result is None:
+            parse_result = self.var_def.parse_string(input_str, parse_all=True)
+
+        new_ast: dict[str, Any] = {
+            "col": column,
+            "children": results_to_list(parse_result),
+            "type": "vardef",
+        }
+
+        return new_ast
+
+    def consume_var_set(
+        self,
+        input_str: str,
+        column: int = 0,
+        parse_result: pp.ParseResults | None = None,
+    ):
+        """Parse a given string for a variable definition."""
+        if parse_result is None:
+            parse_result = self.var_set.parse_string(input_str, parse_all=True)
+
+        new_ast: dict[str, Any] = {
+            "col": column,
+            "children": results_to_list(parse_result),
+            "type": "varset",
+        }
+
+        return new_ast
+
     def parse(self, input_str: str) -> Any:
         """Run the parser on the input string."""
         return results_to_list(
-            self.expr.parse_string(input_str, parse_all=True).as_list()[0]
+            self.prog.parse_string(input_str, parse_all=True).as_list()[0]
         )
