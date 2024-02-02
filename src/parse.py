@@ -68,7 +68,9 @@ class Parser:
         self.expr <<= self.term + pp.ZeroOrMore(self.op_prec[-3] + self.term)
         self.expr.add_parse_action(self.consume_expr)
 
-        self.var_def = self.ident + ":" + self.ident + "=" + self.expr
+        self.var_def = (self.ident + ":" + self.ident + "=" + self.expr) | (
+            self.ident + ":" + "=" + self.expr
+        )
         self.var_def.add_parse_action(self.consume_var_def)
 
         self.var_set = self.ident + "=" + self.expr

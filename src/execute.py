@@ -1,36 +1,120 @@
 """Module providing the interpreter"""
 
-import enum
-from typing import Any
+from typing import Any, Union
 
 import literals
 
 
-class Types(enum.Enum):
-    INT = "int"
-    NUM = "num"
+class Val:
+    value: Any
+
+    def _raise_binary(self, op_name: str, other: Any):
+        raise SyntaxError(
+            f"{op_name} not supported for between type "
+            + f"{type(self)} and type {type(other)}."
+        )
+
+    def add(self, other: Any) -> Any:
+        _ = other
+        self._raise_binary("Addition", other)
+
+    def sub(self, other: Any) -> Any:
+        _ = other
+        self._raise_binary("Subtraction", other)
+
+    def mul(self, other: Any) -> Any:
+        _ = other
+        self._raise_binary("Multiplication", other)
+
+    def div(self, other: Any) -> Any:
+        _ = other
+        self._raise_binary("Division", other)
+
+    def exp(self, other: Any) -> Any:
+        _ = other
+        self._raise_binary("Exponentiation", other)
 
 
-class Var:
-    def __init__(self, val_type: Types, val: Any):
-        self.type = val_type
-        match val_type:
-            case Types.INT:
-                try:
-                    self.value = int(val)
-                except ValueError:
-                    raise SyntaxError(f"{val} is not a valid int.")
+class Int(Val):
+    def __init__(self, value: int):
+        self.value = int(value)
 
-            case Types.NUM:
-                try:
-                    self.value = float(val)
-                except ValueError:
-                    raise SyntaxError(f"{val} is not a valid num.")
+    def add(self, other: Any):
+        if isinstance(other, Num):
+            return Num(self.value + other.value)
+        elif isinstance(other, Int):
+            return Int(self.value + other.value)
+        self._raise_binary("Addition", other)
+
+    def sub(self, other: Any):
+        if isinstance(other, Num):
+            return Num(self.value - other.value)
+        elif isinstance(other, Int):
+            return Int(self.value - other.value)
+        self._raise_binary("Subtraction", other)
+
+    def mul(self, other: Any):
+        if isinstance(other, Num):
+            return Num(self.value * other.value)
+        elif isinstance(other, Int):
+            return Int(self.value * other.value)
+        self._raise_binary("Multiplication", other)
+
+    def div(self, other: Any):
+        if isinstance(other, Num):
+            return Num(self.value / other.value)
+        elif isinstance(other, Int):
+            return Int(self.value / other.value)
+        self._raise_binary("Division", other)
+
+    def exp(self, other: Any):
+        if isinstance(other, Num):
+            return Num(self.value**other.value)
+        elif isinstance(other, Int):
+            return Int(self.value**other.value)
+        self._raise_binary("Exponentiation", other)
+
+
+class Num(Val):
+    def __init__(self, value: float):
+        self.value = float(value)
+        self._operable = Union[Int, Num]
+
+    def add(self, other: Any):
+        if isinstance(other, self._operable):
+            return Num(self.value + other.value)
+        self._raise_binary("Addition", other)
+
+    def sub(self, other: Any):
+        if isinstance(other, self._operable):
+            return Num(self.value - other.value)
+        raise SyntaxError(
+            "Subtraction not supported for between type "
+            + f"{type(self)} and type {type(other)}."
+        )
+
+    def mul(self, other: Any):
+        if isinstance(other, self._operable):
+            return Num(self.value * other.value)
+        self._raise_binary("Multiplication", other)
+
+    def div(self, other: Any):
+        if isinstance(other, self._operable):
+            return Num(self.value / other.value)
+        self._raise_binary("Division", other)
+
+    def exp(self, other: Any):
+        if isinstance(other, self._operable):
+            return Num(self.value**other.value)
+        self._raise_binary("Exponentiation", other)
+
+
+TYPE_KEYWORDS = {"int": Int, "num": Num}
 
 
 class Node:
     @staticmethod
-    def new_node(node: dict[str, Any] | str, varspace: dict[str, Var]):
+    def new_node(node: dict[str, Any] | str, varspace: dict[str, Val]):
         if isinstance(node, str):
             return node
         match node["type"]:
@@ -56,37 +140,41 @@ class Node:
                 raise ValueError(f"Unsupported node type: {node['type']}")
 
 
-class IntNode(Node):
-    def __init__(self, node: dict[str, Any], varspace: dict[str, Var]):
+class ValueNode(Node):
+    def exec(self) -> Val: ...
+
+
+class IntNode(ValueNode):
+    def __init__(self, node: dict[str, Any], varspace: dict[str, Val]):
         self.value = int(node["children"])
         self.varspace = varspace
 
     def exec(self):
-        return self.value
+        return Int(self.value)
 
 
-class NumNode(Node):
-    def __init__(self, node: dict[str, Any], varspace: dict[str, Var]):
+class NumNode(ValueNode):
+    def __init__(self, node: dict[str, Any], varspace: dict[str, Val]):
         self.value = float(node["children"])
         self.varspace = varspace
 
     def exec(self):
-        return self.value
+        return Num(self.value)
 
 
-class IdentNode(Node):
-    def __init__(self, node: dict[str, Any], varspace: dict[str, Var]):
+class IdentNode(ValueNode):
+    def __init__(self, node: dict[str, Any], varspace: dict[str, Val]):
         self.value = node["children"]
         self.varspace = varspace
 
     def exec(self):
         if self.value in self.varspace:
-            return self.varspace[self.value].value
+            return self.varspace[self.value]
         raise SyntaxError(f"Variable {self.value} is not yet defined.")
 
 
 class AtomNode(Node):
-    def __init__(self, node: dict[str, Any], varspace: dict[str, Var]):
+    def __init__(self, node: dict[str, Any], varspace: dict[str, Val]):
         self.children = node["children"]
         for ii, child in enumerate(self.children):
             child: dict[str, Any] | Any
@@ -95,22 +183,27 @@ class AtomNode(Node):
         self.col = node["col"]
         self.varspace = varspace
 
-    def exec(self):
+    def exec(self) -> Val:
         if not self.children:
             raise SyntaxError(f"Expected Atom at col {self.col}")
         if self.children[0] is literals.L_PAREN:
             if len(self.children) != 3 or self.children[2] != literals.R_PAREN:
                 raise SyntaxError(f"Unmatched '(' at col {self.col}")  # )
-            if not isinstance(self.children[1], Node):
+            value: Any | ExprNode = self.children[1]
+            if not isinstance(value, ExprNode):
                 raise SyntaxError(f"Expected Expr at col {self.col}")
-            return self.children[1].exec()
+            return value.exec()
         if len(self.children) > 1:
             raise SyntaxError(f"Expected '(' at col {self.col}")  # )
-        return self.children[0].exec()
+
+        value = self.children[0]
+        if not isinstance(value, ValueNode):
+            raise SyntaxError(f"Expected Expr at col {self.col}")
+        return value.exec()
 
 
 class FactorNode(Node):
-    def __init__(self, node: dict[str, Any], varspace: dict[str, Var]):
+    def __init__(self, node: dict[str, Any], varspace: dict[str, Val]):
         self.children = node["children"]
         for ii, child in enumerate(self.children):
             child: dict[str, Any] | Any
@@ -122,16 +215,18 @@ class FactorNode(Node):
         if not self.children:
             raise SyntaxError(f"Expected Factor at col {self.col}")
         if len(self.children) == 1:
-            return self.children[0].exec()
+            value: Any | AtomNode = self.children[0]
+            if not isinstance(value, AtomNode):
+                raise SyntaxError(f"Expected Atom at col {self.col}")
 
-        right: Any
-        left: Any
+            return value.exec()
+
         op: str | None = None
 
-        right = self.children.pop(0)
+        right: Any | AtomNode = self.children.pop(0)
         if not isinstance(right, AtomNode):
             raise SyntaxError(f"Expected Atom at col {self.col}")
-        right = right.exec()
+        right_val: Val = right.exec()
 
         while self.children:
             if not self.children:
@@ -139,18 +234,17 @@ class FactorNode(Node):
             op = self.children.pop(0)
             if op != literals.OP_EXP:
                 raise SyntaxError(f"Expected {literals.OP_EXP} at col {self.col}")
-            left = self.children.pop(0)
+            left: Any | AtomNode = self.children.pop(0)
             if not isinstance(left, FactorNode):
                 raise SyntaxError(f"Expected Factor at col {self.col}")
-            left = left.exec()
 
-            right = right**left
+            right_val = right_val.exp(left.exec())
 
-        return right
+        return right_val
 
 
 class TermNode(Node):
-    def __init__(self, node: dict[str, Any], varspace: dict[str, Var]):
+    def __init__(self, node: dict[str, Any], varspace: dict[str, Val]):
         self.children = node["children"]
         for ii, child in enumerate(self.children):
             child: dict[str, Any] | Any
@@ -162,16 +256,18 @@ class TermNode(Node):
         if not self.children:
             raise SyntaxError(f"Expected Term at col {self.col}")
         if len(self.children) == 1:
-            return self.children[0].exec()
+            value: Any | FactorNode = self.children[0]
+            if not isinstance(value, FactorNode):
+                raise SyntaxError(f"Expected Factor at col {self.col}")
 
-        right: Any
-        left: Any
+            return value.exec()
+
         op: str | None = None
 
-        right = self.children.pop(0)
+        right: Any | FactorNode = self.children.pop(0)
         if not isinstance(right, FactorNode):
             raise SyntaxError(f"Expected Factor at col {self.col}")
-        right = right.exec()
+        right_val: Val = right.exec()
 
         while self.children:
             if not self.children:
@@ -183,26 +279,26 @@ class TermNode(Node):
                 raise SyntaxError(
                     f"Expected operator with precidence 2 at col {self.col}"
                 )
-            left = self.children.pop(0)
+            left: Any | FactorNode = self.children.pop(0)
             if not isinstance(left, FactorNode):
-                raise SyntaxError(f"Expected Term at col {self.col}")
-            left = left.exec()
+                raise SyntaxError(f"Expected Factor at col {self.col}")
+            left_val = left.exec()
 
             match op:
                 case literals.OP_MUL:
-                    right = right * left
+                    right_val = right_val.mul(left_val)
                 case literals.OP_DIV:
-                    right = right / left
+                    right_val = right_val.div(left_val)
                 case _:
                     raise SyntaxError(
                         f"Expected operator with precidence 2 at col {self.col}"
                     )
 
-        return right
+        return right_val
 
 
 class ExprNode(Node):
-    def __init__(self, node: dict[str, Any], varspace: dict[str, Var]):
+    def __init__(self, node: dict[str, Any], varspace: dict[str, Val]):
         self.children = node["children"]
         for ii, child in enumerate(self.children):
             child: dict[str, Any] | Any
@@ -214,16 +310,17 @@ class ExprNode(Node):
         if not self.children:
             raise SyntaxError(f"Expected Expr at col {self.col}")
         if len(self.children) == 1:
-            return self.children[0].exec()
+            value: Any | TermNode = self.children[0]
+            if not isinstance(value, TermNode):
+                raise SyntaxError(f"Expected TermNode at col {self.col}")
+            return value.exec()
 
-        right: Any
-        left: Any
         op: str | None = None
 
-        right = self.children.pop(0)
+        right: Any | TermNode = self.children.pop(0)
         if not isinstance(right, TermNode):
             raise SyntaxError(f"Expected Term at col {self.col}")
-        right = right.exec()
+        right_val: Val = right.exec()
 
         while self.children:
             if not self.children:
@@ -235,26 +332,26 @@ class ExprNode(Node):
                 raise SyntaxError(
                     f"Expected operator with precidence 1 at col {self.col}"
                 )
-            left = self.children.pop(0)
+            left: Any | TermNode = self.children.pop(0)
             if not isinstance(left, TermNode):
                 raise SyntaxError(f"Expected Term at col {self.col}")
-            left = left.exec()
+            left_val: Val = left.exec()
 
             match op:
                 case literals.OP_ADD:
-                    right = right + left
+                    right_val = right_val.add(left_val)
                 case literals.OP_SUB:
-                    right = right - left
+                    right_val = right_val.sub(left_val)
                 case _:
                     raise SyntaxError(
                         f"Expected operator with precidence 2 at col {self.col}"
                     )
 
-        return right
+        return right_val
 
 
 class VarDefNode(Node):
-    def __init__(self, node: dict[str, Any], varspace: dict[str, Var]):
+    def __init__(self, node: dict[str, Any], varspace: dict[str, Val]):
         self.children = node["children"]
         for ii, child in enumerate(self.children):
             child: dict[str, Any] | Any
@@ -262,10 +359,7 @@ class VarDefNode(Node):
         self.col = node["col"]
         self.varspace = varspace
 
-    def exec(self):
-        if len(self.children) != 5:
-            raise SyntaxError(f"Invalid variable definition at col {self.col}")
-
+    def _exec_explicit(self):
         if not isinstance(self.children[0], IdentNode):
             raise SyntaxError(
                 f"Variable definition must begin with an identifier, not {self.children[0]}."
@@ -282,8 +376,8 @@ class VarDefNode(Node):
             )
 
         try:
-            var_type = Types(self.children[2].value)
-        except ValueError:
+            var_type = TYPE_KEYWORDS[self.children[2].value]
+        except KeyError:
             raise SyntaxError(f"{self.children[2]} is not a valid type.")
 
         if self.children[3] != "=":
@@ -291,15 +385,55 @@ class VarDefNode(Node):
 
         var_val = self.children[4].exec()
 
-        var = Var(var_type, var_val)
+        if isinstance(var_val, Val):
+            var_val = var_val.value
 
-        self.varspace[var_name] = var
+        try:
+            val = var_type(var_val)
+        except (TypeError, ValueError):
+            raise SyntaxError(f"Incompatible value for type {var_type}: {var_val}")
 
-        return var.value
+        self.varspace[var_name] = val
+
+        return val
+
+    def _exec_implicit(self):
+        if not isinstance(self.children[0], IdentNode):
+            raise SyntaxError(
+                f"Variable definition must begin with an identifier, not {self.children[0]}."
+            )
+
+        var_name: str = self.children[0].value
+
+        if self.children[1] != ":":
+            raise SyntaxError("Expected ':' to specify type in variable definition.")
+
+        if self.children[2] != "=":
+            raise SyntaxError("Expected '=' to specify value in variable definition.")
+
+        value = self.children[3]
+
+        var_val = value.exec()
+
+        if not isinstance(var_val, Val):
+            raise SyntaxError(f"Cannot infer type from '{self.children[3]}'")
+
+        self.varspace[var_name] = var_val
+
+        return var_val
+
+    def exec(self):
+        if len(self.children) == 5:
+            return self._exec_explicit()
+
+        if len(self.children) == 4:
+            return self._exec_implicit()
+
+        raise SyntaxError(f"Invalid variable definition at col {self.col}")
 
 
 class VarSetNode(Node):
-    def __init__(self, node: dict[str, Any], varspace: dict[str, Var]):
+    def __init__(self, node: dict[str, Any], varspace: dict[str, Val]):
         self.children = node["children"]
         for ii, child in enumerate(self.children):
             child: dict[str, Any] | Any
@@ -324,26 +458,26 @@ class VarSetNode(Node):
                 + f"{var_name} has not yet been defined."
             )
 
-        var_type = self.varspace[var_name].type
+        var_type = type(self.varspace[var_name])
 
         if self.children[1] != "=":
             raise SyntaxError("Expected '=' to specify value in variable reset.")
 
         var_val = self.children[2].exec()
 
-        var = Var(var_type, var_val)
+        val = var_type(var_val.value)
 
-        self.varspace[var_name] = var
+        self.varspace[var_name] = val
 
-        return var.value
+        return val
 
 
 class Executor:
     def __init__(self):
-        self.globals: dict[str, Var] = {}
+        self.globals: dict[str, Val] = {}
 
     def exec(self, ast: dict[str, Any]):
         node = Node.new_node(ast, self.globals)
         if isinstance(node, str):
-            return node
+            raise SyntaxError(f"{node} cannot be executed.")
         return node.exec()

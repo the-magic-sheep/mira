@@ -1,0 +1,8 @@
+#! /usr/bin/env bash
+
+if [ -z $1 ]; then
+    py3 ./src/repl.py
+    exit 0
+else
+    py3 ./src/run.py $@
+fi
