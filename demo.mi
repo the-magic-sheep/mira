@@ -1,1 +1,7 @@
+x: = 3 + 3
 
+x = x ^ x
+
+y:int = x + 3
+
+echo x - y

@@ -1,2 +1,2 @@
-py3 ./src/lsp/main.py
+py3 ./src/lsp.py
 

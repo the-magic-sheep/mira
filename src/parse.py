@@ -4,6 +4,23 @@ import pyparsing as pp
 
 import literals
 
+pp.ParserElement.set_default_whitespace_chars(" \t")
+
+
+def compute_column(full_text: str, position: int):
+    if not full_text:
+        return 0
+
+    if position >= len(full_text):
+        position = len(full_text) - 1
+
+    start_position = position
+
+    while position and full_text[position] != "\n":
+        position -= 1
+
+    return start_position - position + 1
+
 
 def results_to_list(
     parse_result: pp.ParseResults | list[dict[str, Any]] | Any,
@@ -32,12 +49,16 @@ def results_to_list(
 class Parser:
 
     def __init__(self):
+
+        self.line_count = 1
         self.int = pp.Regex(r"[+-]?[0-9]+")
         self.int.add_parse_action(self.consume_int)
         self.num = pp.Regex(r"[+-]?\d+(\.\d*|[eE][+-]?\d+)")
         self.num.add_parse_action(self.consume_num)
         self.ident = pp.Regex(r"[_a-zA-Z]+[_a-zA-Z0-9]*")
         self.ident.add_parse_action(self.consume_ident)
+
+        self.newline = pp.Literal("\n").add_parse_action(self.consume_newline)
 
         self.plus = pp.Literal(literals.OP_ADD)
         self.minus = pp.Literal(literals.OP_SUB)
@@ -76,14 +97,38 @@ class Parser:
         self.var_set = self.ident + "=" + self.expr
         self.var_set.add_parse_action(self.consume_var_set)
 
-        self.prog = self.var_def | self.var_set | self.expr
+        self.echo = pp.Literal("echo") + self.expr
+        self.echo.add_parse_action(self.consume_echo)
+
+        self.prog = pp.ZeroOrMore(
+            self.echo | self.var_def | self.var_set | self.expr | self.newline
+        )
 
         self.ast: list[dict[str, Any]] = []
+
+    def consume_newline(
+        self,
+        input_str: str,
+        position: int = 0,
+        parse_result: pp.ParseResults | None = None,
+    ):
+        if parse_result is None:
+            parse_result = self.newline.parse_string(input_str, parse_all=True)
+
+        new_ast: dict[str, Any] = {
+            "col": compute_column(input_str, position),
+            "children": parse_result[0],
+            "type": "newline",
+            "line": self.line_count,
+        }
+
+        self.line_count += 1
+        return new_ast
 
     def consume_ident(
         self,
         input_str: str,
-        column: int = 0,
+        position: int = 0,
         parse_result: pp.ParseResults | None = None,
     ):
         """Parse a given string for an identifier."""
@@ -91,9 +136,10 @@ class Parser:
             parse_result = self.ident.parse_string(input_str, parse_all=True)
 
         new_ast: dict[str, Any] = {
-            "col": column,
+            "col": compute_column(input_str, position),
             "children": parse_result[0],
             "type": "ident",
+            "line": self.line_count,
         }
 
         return new_ast
@@ -101,7 +147,7 @@ class Parser:
     def consume_int(
         self,
         input_str: str,
-        column: int = 0,
+        position: int = 0,
         parse_result: pp.ParseResults | None = None,
     ):
         """Parse a given string for an integer literal."""
@@ -109,9 +155,10 @@ class Parser:
             parse_result = self.int.parse_string(input_str, parse_all=True)
 
         new_ast: dict[str, Any] = {
-            "col": column,
+            "col": compute_column(input_str, position),
             "children": parse_result[0],
             "type": "int",
+            "line": self.line_count,
         }
 
         return new_ast
@@ -119,7 +166,7 @@ class Parser:
     def consume_num(
         self,
         input_str: str,
-        column: int = 0,
+        position: int = 0,
         parse_result: pp.ParseResults | None = None,
     ):
         """Parse a given string for a number literal."""
@@ -127,9 +174,10 @@ class Parser:
             parse_result = self.num.parse_string(input_str, parse_all=True)
 
         new_ast: dict[str, Any] = {
-            "col": column,
+            "col": compute_column(input_str, position),
             "children": parse_result[0],
             "type": "num",
+            "line": self.line_count,
         }
 
         return new_ast
@@ -137,7 +185,7 @@ class Parser:
     def consume_atom(
         self,
         input_str: str,
-        column: int = 0,
+        position: int = 0,
         parse_result: pp.ParseResults | None = None,
     ):
         """Parse a given string for an atom."""
@@ -145,9 +193,10 @@ class Parser:
             parse_result = self.atom.parse_string(input_str, parse_all=True)
 
         new_ast: dict[str, Any] = {
-            "col": column,
+            "col": compute_column(input_str, position),
             "children": results_to_list(parse_result),
             "type": "atom",
+            "line": self.line_count,
         }
 
         return new_ast
@@ -155,7 +204,7 @@ class Parser:
     def consume_factor(
         self,
         input_str: str,
-        column: int = 0,
+        position: int = 0,
         parse_result: pp.ParseResults | None = None,
     ):
         """Parse a given string for a factor."""
@@ -163,9 +212,10 @@ class Parser:
             parse_result = self.factor.parse_string(input_str, parse_all=True)
 
         new_ast: dict[str, Any] = {
-            "col": column,
+            "col": compute_column(input_str, position),
             "children": results_to_list(parse_result),
             "type": "factor",
+            "line": self.line_count,
         }
 
         return new_ast
@@ -173,7 +223,7 @@ class Parser:
     def consume_term(
         self,
         input_str: str,
-        column: int = 0,
+        position: int = 0,
         parse_result: pp.ParseResults | None = None,
     ):
         """Parse a given string for a term."""
@@ -181,9 +231,10 @@ class Parser:
             parse_result = self.term.parse_string(input_str, parse_all=True)
 
         new_ast: dict[str, Any] = {
-            "col": column,
+            "col": compute_column(input_str, position),
             "children": results_to_list(parse_result),
             "type": "term",
+            "line": self.line_count,
         }
 
         return new_ast
@@ -191,7 +242,7 @@ class Parser:
     def consume_expr(
         self,
         input_str: str,
-        column: int = 0,
+        position: int = 0,
         parse_result: pp.ParseResults | None = None,
     ):
         """Parse a given string for an expr."""
@@ -199,9 +250,10 @@ class Parser:
             parse_result = self.expr.parse_string(input_str, parse_all=True)
 
         new_ast: dict[str, Any] = {
-            "col": column,
+            "col": compute_column(input_str, position),
             "children": results_to_list(parse_result),
             "type": "expr",
+            "line": self.line_count,
         }
 
         return new_ast
@@ -209,7 +261,7 @@ class Parser:
     def consume_var_def(
         self,
         input_str: str,
-        column: int = 0,
+        position: int = 0,
         parse_result: pp.ParseResults | None = None,
     ):
         """Parse a given string for a variable definition."""
@@ -217,9 +269,10 @@ class Parser:
             parse_result = self.var_def.parse_string(input_str, parse_all=True)
 
         new_ast: dict[str, Any] = {
-            "col": column,
+            "col": compute_column(input_str, position),
             "children": results_to_list(parse_result),
             "type": "vardef",
+            "line": self.line_count,
         }
 
         return new_ast
@@ -227,17 +280,37 @@ class Parser:
     def consume_var_set(
         self,
         input_str: str,
-        column: int = 0,
+        position: int = 0,
         parse_result: pp.ParseResults | None = None,
     ):
-        """Parse a given string for a variable definition."""
+        """Parse a given string for a variable reset."""
         if parse_result is None:
             parse_result = self.var_set.parse_string(input_str, parse_all=True)
 
         new_ast: dict[str, Any] = {
-            "col": column,
+            "col": compute_column(input_str, position),
             "children": results_to_list(parse_result),
             "type": "varset",
+            "line": self.line_count,
+        }
+
+        return new_ast
+
+    def consume_echo(
+        self,
+        input_str: str,
+        position: int = 0,
+        parse_result: pp.ParseResults | None = None,
+    ):
+        """Parse a given string for an echo statement."""
+        if parse_result is None:
+            parse_result = self.echo.parse_string(input_str, parse_all=True)
+
+        new_ast: dict[str, Any] = {
+            "col": compute_column(input_str, position),
+            "children": results_to_list(parse_result),
+            "type": "echo",
+            "line": self.line_count,
         }
 
         return new_ast
@@ -245,5 +318,5 @@ class Parser:
     def parse(self, input_str: str) -> Any:
         """Run the parser on the input string."""
         return results_to_list(
-            self.prog.parse_string(input_str, parse_all=True).as_list()[0]
+            self.prog.parse_string(input_str, parse_all=True).as_list()
         )

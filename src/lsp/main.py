@@ -4,13 +4,49 @@ from typing import Any
 from lsprotocol import types as lsp
 import pygls.server
 
+import parse
+
+LOGFILE = "/home/joshua/mira-lsp-logfile"
+
 server = pygls.server.LanguageServer("example-server", "v0.1")
+modules: dict[str, "Module"] = {}
+parser = parse.Parser()
 
 
-def log(message: Any, logfile: str = "/home/joshua/mira-lsp-logfile"):
+with open(LOGFILE, "w") as f:
+    f.write("LSP Started.")
+
+
+def log(message: Any, logfile: str = LOGFILE):
     with open(logfile, "a") as f:
         f.write(repr(message))
         f.write("\n")
+
+
+def file_uri_to_path(uri: str):
+    if uri.startswith("file://"):
+        uri = uri[7:]
+
+    return uri
+
+
+class Module:
+    def __init__(self, name: str, content: str):
+        self.name = name
+        self.content = content
+        self.ast = parser.parse(content)
+
+
+log("created server feature")
+
+
+@server.feature(lsp.TEXT_DOCUMENT_DID_OPEN)
+def load_new(params: lsp.DidOpenTextDocumentParams):
+    uri = params.text_document.uri
+    text = params.text_document.text
+    log("Opened File: " + file_uri_to_path(uri))
+    log(text)
+    modules[uri] = Module(uri, text)
 
 
 @server.feature(
@@ -20,7 +56,7 @@ def completions(params: lsp.CompletionParams):
     items = []
     document = server.workspace.get_document(params.text_document.uri)
     current_line = document.lines[params.position.line].strip()
-    log(current_line)
+    log("Completion Requested: " + current_line)
     if current_line.endswith("hello."):
         items = [
             lsp.CompletionItem(label="world"),
