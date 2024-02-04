@@ -1,0 +1,117 @@
+====
+Test Comment
+====
+
+# This is a comment
+
+---
+
+(module
+      (comment))
+
+====
+Test Comment No space
+====
+
+#This is a comment
+
+---
+
+(module
+      (comment))
+
+====
+Test Comment With Hashtag
+====
+
+# # This is a comment
+
+---
+
+(module
+      (comment))
+
+====
+Test Comment Empty
+====
+
+#
+
+---
+
+(module
+      (comment))
+
+====
+Test Block Comment
+====
+
+## This is a comment ##
+
+
+---
+
+(module
+      (block_comment))
+
+====
+Test Block Comment No Space
+====
+
+##This is a comment##
+
+
+---
+
+(module
+      (block_comment))
+
+====
+Test Block Comment Multi-Line
+====
+
+##
+
+This is a comment
+
+This is still the same comment.
+
+##
+
+
+---
+
+(module
+      (block_comment))
+
+
+====
+Test Block Comment Hybrid
+====
+
+## This is a comment
+
+This is still the same comment. ##
+
+
+---
+
+(module
+      (block_comment))
+
+
+====
+Test Block Comment With Hashtag
+====
+
+## This is a comment
+
+# #This is still the same comment. ##
+
+
+---
+
+(module
+      (block_comment))
+
+

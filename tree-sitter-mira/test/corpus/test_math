@@ -1,0 +1,237 @@
+====
+Test Single Int
+====
+
+1
+
+---
+
+(module
+    (expr
+        (int)))
+
+
+====
+Test Single Num Dot End
+====
+
+1.
+
+---
+
+(module
+    (expr
+        (num)))
+
+====
+Test Single Num Dot Start
+====
+
+.1
+
+---
+
+(module
+    (ERROR
+        (UNEXPECTED '.'))
+    (expr
+        (int)))
+
+
+====
+Test Num Two Dots
+====
+
+123.456.789
+
+---
+
+(module
+    (expr
+        (num))
+    (ERROR
+        (UNEXPECTED '.'))
+    (expr
+        (int)))
+
+====
+Test Full Num
+====
+
+123.456789
+
+---
+
+(module
+    (expr
+        (num)))
+
+====
+Test Positive Num
+====
+
++123.456789
+
+---
+
+(module
+    (expr
+        (num)))
+
+====
+Test Positive Num With Space
+====
+
++ 123.456789
+
+---
+
+(module
+    (ERROR)
+    (expr
+        (num)))
+
+====
+Test Negative Num
+====
+
+-123.456789
+
+---
+
+(module
+    (expr
+        (num)))
+
+
+====
+Test Identifier Single Char
+====
+
+x
+
+---
+
+(module
+    (expr
+        (ident)))
+
+====
+Test Identifier Single Underscore
+====
+
+_
+
+---
+
+(module
+    (expr
+        (ident)))
+
+====
+Test Identifier Full
+====
+
+_this_is_the_identifier
+
+---
+
+(module
+    (expr
+        (ident)))
+
+===
+Test Int Plus Int
+===
+
+1 + 1
+
+---
+
+(module
+    (expr
+        (binary
+            (expr
+                (int))
+            (expr
+                (int)))))
+
+===
+Test Int Plus Num
+===
+
+1 + 4.5
+
+---
+
+(module
+    (expr
+        (binary
+            (expr
+                (int))
+            (expr
+                (num)))))
+
+===
+Test Num Plus Int
+===
+
+4.5 + 1
+
+---
+
+(module
+    (expr
+        (binary
+            (expr
+                (num))
+            (expr
+                (int)))))
+
+===
+Test Num Plus Num
+===
+
+4.5 + 4.5
+
+---
+
+(module
+    (expr
+        (binary
+            (expr
+                (num))
+            (expr
+                (num)))))
+
+===
+Test Ident Plus Num
+===
+
+x + 4.5
+
+---
+
+(module
+    (expr
+        (binary
+            (expr
+                (ident))
+            (expr
+                (num)))))
+
+===
+Test Ident Plus Ident
+===
+
+x + x
+
+---
+
+(module
+    (expr
+        (binary
+            (expr
+                (ident))
+            (expr
+                (ident)))))
