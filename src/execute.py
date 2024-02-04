@@ -1,6 +1,7 @@
 """Module providing the interpreter"""
 
-from typing import Any, Union
+import copy
+from typing import Any, Type, Union
 
 import literals
 
@@ -109,37 +110,94 @@ class Num(Val):
         self._raise_binary("Exponentiation", other)
 
 
+class CallableType:
+    def __init__(self, return_type: Type[Val], params: dict[str, Type[Val]]):
+        self.params = params
+        self.return_type = return_type
+
+
+class Callable:
+    def __init__(self, name: str, callable_type: CallableType, definition: "ExprNode"):
+        self.name = name
+        self.type = callable_type
+        self.definition = definition
+
+    def call(self, params: dict[str, Val]):
+
+        definition = copy.deepcopy(self.definition)
+
+        if set(params) - set(self.type.params):
+            extra_params = ""
+            for param in set(params) - set(self.type.params):
+                extra_params += param + ", "
+
+            extra_params = extra_params[:-2]
+            raise SyntaxError(
+                f"Callable 'f{self.name}' recieved unexpected paramuments:\n"
+                + extra_params
+            )
+
+        if set(self.type.params) - set(params):
+            missing_params = ""
+            for param in set(self.type.params) - set(params):
+                missing_params += param + ", "
+
+            missing_params = missing_params[:-2]
+            raise SyntaxError(
+                f"Callable 'f{self.name}' missing paramuments:\n" + missing_params
+            )
+
+        for param_name, param_val in params.items():
+            definition.varspace[param_name] = param_val
+
+        return self.type.return_type(definition.exec().value)
+
+
 TYPE_KEYWORDS = {"int": Int, "num": Num}
 
 
 class Node:
     @staticmethod
-    def new_node(node: dict[str, Any] | str, varspace: dict[str, Val]):
+    def new_node(
+        node: dict[str, Any] | str,
+        varspace: dict[str, Val],
+        callspace: dict[str, Callable],
+    ):
         if isinstance(node, str):
             return node
         match node["type"]:
             case "int":
-                return IntNode(node, varspace)
+                return IntNode(node, varspace, callspace)
             case "num":
-                return NumNode(node, varspace)
+                return NumNode(node, varspace, callspace)
             case "ident":
-                return IdentNode(node, varspace)
+                return IdentNode(node, varspace, callspace)
             case "atom":
-                return AtomNode(node, varspace)
+                return AtomNode(node, varspace, callspace)
             case "factor":
-                return FactorNode(node, varspace)
+                return FactorNode(node, varspace, callspace)
             case "term":
-                return TermNode(node, varspace)
+                return TermNode(node, varspace, callspace)
             case "expr":
-                return ExprNode(node, varspace)
+                return ExprNode(node, varspace, callspace)
             case "vardef":
-                return VarDefNode(node, varspace)
+                return VarDefNode(node, varspace, callspace)
             case "varset":
-                return VarSetNode(node, varspace)
+                return VarSetNode(node, varspace, callspace)
             case "echo":
-                return EchoNode(node, varspace)
+                return EchoNode(node, varspace, callspace)
             case "newline":
                 return None
+            case "paramlist":
+                return ParamListNode(node, varspace, callspace)
+            case "callable":
+                return CallableNode(node, varspace, callspace)
+            case "callable_def":
+                return CallableDefNode(node, varspace, callspace)
+            case "arglist":
+                return ArgListNode(node, varspace, callspace)
+            case "call":
+                return CallNode(node, varspace, callspace)
             case _:
                 raise ValueError(f"Unsupported node type: {node['type']}\n")
 
@@ -149,27 +207,45 @@ class ValueNode(Node):
 
 
 class IntNode(ValueNode):
-    def __init__(self, node: dict[str, Any], varspace: dict[str, Val]):
+    def __init__(
+        self,
+        node: dict[str, Any],
+        varspace: dict[str, Val],
+        callspace: dict[str, Callable],
+    ):
         self.value = int(node["children"])
         self.varspace = varspace
+        self.callspace = callspace
 
     def exec(self):
         return Int(self.value)
 
 
 class NumNode(ValueNode):
-    def __init__(self, node: dict[str, Any], varspace: dict[str, Val]):
+    def __init__(
+        self,
+        node: dict[str, Any],
+        varspace: dict[str, Val],
+        callspace: dict[str, Callable],
+    ):
         self.value = float(node["children"])
         self.varspace = varspace
+        self.callspace = callspace
 
     def exec(self):
         return Num(self.value)
 
 
 class IdentNode(ValueNode):
-    def __init__(self, node: dict[str, Any], varspace: dict[str, Val]):
-        self.value = node["children"]
+    def __init__(
+        self,
+        node: dict[str, Any],
+        varspace: dict[str, Val],
+        callspace: dict[str, Callable],
+    ):
+        self.value: str = node["children"]
         self.varspace = varspace
+        self.callspace = callspace
 
     def exec(self):
         if self.value in self.varspace:
@@ -177,57 +253,305 @@ class IdentNode(ValueNode):
         raise SyntaxError(f"Variable {self.value} is not yet defined.\n")
 
 
-class AtomNode(Node):
-    def __init__(self, node: dict[str, Any], varspace: dict[str, Val]):
+class ArgListNode(Node):
+    def __init__(
+        self,
+        node: dict[str, Any],
+        varspace: dict[str, Val],
+        callspace: dict[str, Callable],
+    ):
         self.children = node["children"]
         for ii, child in enumerate(self.children):
             child: dict[str, Any] | Any
             if isinstance(child, dict):
-                self.children[ii] = Node.new_node(child, varspace)
+                self.children[ii] = Node.new_node(child, varspace, callspace)
         self.col = node["col"]
         self.varspace = varspace
+        self.callspace = callspace
+        self.line = node["line"]
+
+    def exec(self):
+
+        args: dict[str, Val] = {}
+        children = self.children.copy()
+        while children:
+            ident = children.pop(0)
+            if not isinstance(ident, IdentNode):
+                raise SyntaxError(
+                    f"Invalid arglist at line {self.line}, col {self.col}.\n"
+                    + "Expected identifier."
+                )
+
+            arg_ident = ident.value
+
+            if arg_ident in args:
+                raise SyntaxError(
+                    f"Invalid arglist at line {self.line}, col {self.col}.\n"
+                    + f"Argument {arg_ident} is repeated."
+                )
+
+            # Consume '='
+            children.pop(0)
+
+            arg_expr = children.pop(0)
+            if not isinstance(arg_expr, ExprNode):
+                raise SyntaxError(
+                    f"Invalid arglist at line {self.line}, col {self.col}.\n"
+                    + "Expected expression."
+                )
+
+            arg_val = arg_expr.exec()
+
+            args[arg_ident] = arg_val
+
+            if children:
+                # Pop the optional comma
+                children.pop(0)
+
+        return args
+
+
+class CallNode(ValueNode):
+    def __init__(
+        self,
+        node: dict[str, Any],
+        varspace: dict[str, Val],
+        callspace: dict[str, Callable],
+    ):
+        self.children = node["children"]
+        for ii, child in enumerate(self.children):
+            child: dict[str, Any] | Any
+            if isinstance(child, dict):
+                self.children[ii] = Node.new_node(child, varspace, callspace)
+        self.col = node["col"]
+        self.varspace = varspace
+        self.callspace = callspace
+        self.line = node["line"]
+
+    def exec(self):
+        callable_ident = self.children[0]
+        if not isinstance(callable_ident, IdentNode):
+            raise SyntaxError(
+                f"Invalid call at line {self.line}, col {self.col}.\n"
+                + "Expected identifier."
+            )
+        callable_name = callable_ident.value
+
+        if callable_name not in self.callspace:
+            raise SyntaxError(
+                f"Invalid call at line {self.line}, col {self.col}."
+                + f"callable {callable_name} has not yet been defined."
+            )
+
+        arglist: ArgListNode = self.children[2]
+
+        args = arglist.exec()
+
+        try:
+            return self.callspace[callable_name].call(args)
+        except RecursionError:
+            raise SyntaxError(
+                "Maximum recursion depth reached during call.\n"
+                + f"In call '{callable_name}' at line {self.line}, col {self.col}."
+            )
+
+
+class ParamListNode(Node):
+    def __init__(
+        self,
+        node: dict[str, Any],
+        varspace: dict[str, Val],
+        callspace: dict[str, Callable],
+    ):
+        self.children = node["children"]
+        for ii, child in enumerate(self.children):
+            child: dict[str, Any] | Any
+            if isinstance(child, dict):
+                self.children[ii] = Node.new_node(child, varspace, callspace)
+        self.col = node["col"]
+        self.varspace = varspace
+        self.callspace = callspace
+        self.line = node["line"]
+
+    def exec(self):
+
+        params: dict[str, Type[Val]] = {}
+        children = self.children.copy()
+        while children:
+            ident = children.pop(0)
+            if not isinstance(ident, IdentNode):
+                raise SyntaxError(
+                    f"Invalid paramlist at line {self.line}, col {self.col}."
+                    + "Expected identifier."
+                )
+
+            param_ident = ident.value
+
+            if param_ident in params:
+                raise SyntaxError(
+                    f"Invalid paramlist at line {self.line}, col {self.col}."
+                    + f"Parameter {param_ident} is repeated."
+                )
+
+            # Consume ':'
+            children.pop(0)
+
+            param_type = children.pop(0)
+            if not isinstance(param_type, IdentNode):
+                raise SyntaxError(
+                    f"Invalid paramlist at line {self.line}, col {self.col}."
+                    + "Expected identifier."
+                )
+
+            if param_type.value not in TYPE_KEYWORDS:
+                raise SyntaxError(
+                    f"Invalid paramlist at line {self.line}, col {self.col}."
+                    + f"{param_type.value} is not a valid type."
+                )
+
+            params[param_ident] = TYPE_KEYWORDS[param_type.value]
+
+            if children:
+                # Pop the optional comma
+                children.pop(0)
+
+        return params
+
+
+class CallableNode(Node):
+    def __init__(
+        self,
+        node: dict[str, Any],
+        varspace: dict[str, Val],
+        callspace: dict[str, Callable],
+    ):
+        self.children = node["children"]
+        for ii, child in enumerate(self.children):
+            child: dict[str, Any] | Any
+            if isinstance(child, dict):
+                self.children[ii] = Node.new_node(child, varspace, callspace)
+        self.col = node["col"]
+        self.varspace = varspace
+        self.callspace = callspace
+        self.line = node["line"]
+
+    def exec(self):
+        return_type_ident: IdentNode = self.children.pop(0)
+
+        return_type = return_type_ident.value
+
+        if return_type not in TYPE_KEYWORDS:
+            raise SyntaxError(
+                f"Invalid callable type at line {self.line}, col {self.col}\n"
+                + f"{return_type} is not a valid return type."
+            )
+
+        self.children.pop(0)
+
+        if self.children[0] == ")":
+            return CallableType(TYPE_KEYWORDS[return_type], {})
+
+        paramlist: ParamListNode = self.children[0]
+
+        return CallableType(TYPE_KEYWORDS[return_type], paramlist.exec())
+
+
+class CallableDefNode(Node):
+    def __init__(
+        self,
+        node: dict[str, Any],
+        varspace: dict[str, Val],
+        callspace: dict[str, Callable],
+    ):
+        self.children = node["children"]
+        for ii, child in enumerate(self.children):
+            child: dict[str, Any] | Any
+            if isinstance(child, dict):
+                self.children[ii] = Node.new_node(child, varspace, callspace)
+        self.col = node["col"]
+        self.varspace = varspace
+        self.callspace = callspace
+        self.line = node["line"]
+
+    def exec(self):
+        callable_name: str = self.children[0].value
+
+        callable_type: CallableType = self.children[2].exec()
+
+        expr: ExprNode = self.children[4]
+
+        callable_ = Callable(callable_name, callable_type, expr)
+        self.callspace[callable_name] = callable_
+        if callable_name in self.varspace:
+            del self.varspace[callable_name]
+
+        return callable_
+
+
+class AtomNode(Node):
+    def __init__(
+        self,
+        node: dict[str, Any],
+        varspace: dict[str, Val],
+        callspace: dict[str, Callable],
+    ):
+        self.children = node["children"]
+        self.col = node["col"]
+        self.varspace = varspace
+        self.callspace = callspace
         self.line = node["line"]
 
     def exec(self) -> Val:
-        if not self.children:
+        children = [
+            Node.new_node(child, self.varspace, self.callspace)
+            for child in self.children
+        ]
+        if not children:
             raise SyntaxError(f"Expected Atom at line {self.line}, col {self.col}\n")
-        if self.children[0] is literals.L_PAREN:
-            if len(self.children) != 3 or self.children[2] != literals.R_PAREN:
+        if children[0] is literals.L_PAREN:
+            if len(children) != 3 or children[2] != literals.R_PAREN:
                 raise SyntaxError(
                     f"Unmatched '(' at line {self.line}, col {self.col}\n"
                 )  # )
-            value: Any | ExprNode = self.children[1]
+            value: Any | ExprNode = children[1]
             if not isinstance(value, ExprNode):
                 raise SyntaxError(
                     f"Expected Expr at line {self.line}, col {self.col}\n"
                 )
             return value.exec()
-        if len(self.children) > 1:
+        if len(children) > 1:
             raise SyntaxError(
                 f"Expected '(' at line {self.line}, col {self.col}\n"
             )  # )
 
-        value = self.children[0]
+        value = children[0]
         if not isinstance(value, ValueNode):
-            raise SyntaxError(f"Expected Expr at line {self.line}, col {self.col}\n")
+            raise SyntaxError(f"Expected value at line {self.line}, col {self.col}\n")
         return value.exec()
 
 
 class FactorNode(Node):
-    def __init__(self, node: dict[str, Any], varspace: dict[str, Val]):
+    def __init__(
+        self,
+        node: dict[str, Any],
+        varspace: dict[str, Val],
+        callspace: dict[str, Callable],
+    ):
         self.children = node["children"]
-        for ii, child in enumerate(self.children):
-            child: dict[str, Any] | Any
-            self.children[ii] = Node.new_node(child, varspace)
         self.col = node["col"]
         self.varspace = varspace
+        self.callspace = callspace
         self.line = node["line"]
 
     def exec(self):
-        if not self.children:
+        children = [
+            Node.new_node(child, self.varspace, self.callspace)
+            for child in self.children
+        ]
+        if not children:
             raise SyntaxError(f"Expected Factor at line {self.line}, col {self.col}\n")
-        if len(self.children) == 1:
-            value: Any | AtomNode = self.children[0]
+        if len(children) == 1:
+            value: Any | AtomNode = children[0]
             if not isinstance(value, AtomNode):
                 raise SyntaxError(
                     f"Expected Atom at line {self.line}, col {self.col}\n"
@@ -235,24 +559,24 @@ class FactorNode(Node):
 
             return value.exec()
 
-        op: str | None = None
+        op: Any | None = None
 
-        right: Any | AtomNode = self.children.pop(0)
+        right: Any | AtomNode = children.pop(0)
         if not isinstance(right, AtomNode):
             raise SyntaxError(f"Expected Atom at line {self.line}, col {self.col}\n")
         right_val: Val = right.exec()
 
-        while self.children:
-            if not self.children:
+        while children:
+            if not children:
                 raise SyntaxError(
                     f"Expected {literals.OP_EXP} at line {self.line}, col {self.col}\n"
                 )
-            op = self.children.pop(0)
+            op = children.pop(0)
             if op != literals.OP_EXP:
                 raise SyntaxError(
                     f"Expected {literals.OP_EXP} at line {self.line}, col {self.col}\n"
                 )
-            left: Any | AtomNode = self.children.pop(0)
+            left: Any | AtomNode = children.pop(0)
             if not isinstance(left, FactorNode):
                 raise SyntaxError(
                     f"Expected Factor at line {self.line}, col {self.col}\n"
@@ -264,20 +588,27 @@ class FactorNode(Node):
 
 
 class TermNode(Node):
-    def __init__(self, node: dict[str, Any], varspace: dict[str, Val]):
+    def __init__(
+        self,
+        node: dict[str, Any],
+        varspace: dict[str, Val],
+        callspace: dict[str, Callable],
+    ):
         self.children = node["children"]
-        for ii, child in enumerate(self.children):
-            child: dict[str, Any] | Any
-            self.children[ii] = Node.new_node(child, varspace)
         self.col = node["col"]
         self.varspace = varspace
+        self.callspace = callspace
         self.line = node["line"]
 
     def exec(self):
-        if not self.children:
+        children = [
+            Node.new_node(child, self.varspace, self.callspace)
+            for child in self.children
+        ]
+        if not children:
             raise SyntaxError(f"Expected Term at line {self.line}, col {self.col}\n")
-        if len(self.children) == 1:
-            value: Any | FactorNode = self.children[0]
+        if len(children) == 1:
+            value: Any | FactorNode = children[0]
             if not isinstance(value, FactorNode):
                 raise SyntaxError(
                     f"Expected Factor at line {self.line}, col {self.col}\n"
@@ -285,24 +616,24 @@ class TermNode(Node):
 
             return value.exec()
 
-        op: str | None = None
+        op: Any | None = None
 
-        right: Any | FactorNode = self.children.pop(0)
+        right: Any | FactorNode = children.pop(0)
         if not isinstance(right, FactorNode):
             raise SyntaxError(f"Expected Factor at line {self.line}, col {self.col}\n")
         right_val: Val = right.exec()
 
-        while self.children:
-            if not self.children:
+        while children:
+            if not children:
                 raise SyntaxError(
                     f"Expected operator with precidence 2 at line {self.line}, col {self.col}\n"
                 )
-            op = self.children.pop(0)
+            op = children.pop(0)
             if op not in [literals.OP_MUL, literals.OP_DIV]:
                 raise SyntaxError(
                     f"Expected operator with precidence 2 at line {self.line}, col {self.col}\n"
                 )
-            left: Any | FactorNode = self.children.pop(0)
+            left: Any | FactorNode = children.pop(0)
             if not isinstance(left, FactorNode):
                 raise SyntaxError(
                     f"Expected Factor at line {self.line}, col {self.col}\n"
@@ -323,44 +654,51 @@ class TermNode(Node):
 
 
 class ExprNode(Node):
-    def __init__(self, node: dict[str, Any], varspace: dict[str, Val]):
+    def __init__(
+        self,
+        node: dict[str, Any],
+        varspace: dict[str, Val],
+        callspace: dict[str, Callable],
+    ):
         self.children = node["children"]
-        for ii, child in enumerate(self.children):
-            child: dict[str, Any] | Any
-            self.children[ii] = Node.new_node(child, varspace)
         self.col = node["col"]
         self.varspace = varspace
+        self.callspace = callspace
         self.line = node["line"]
 
     def exec(self):
-        if not self.children:
+        children = [
+            Node.new_node(child, self.varspace, self.callspace)
+            for child in self.children
+        ]
+        if not children:
             raise SyntaxError(f"Expected Expr at line {self.line}, col {self.col}\n")
-        if len(self.children) == 1:
-            value: Any | TermNode = self.children[0]
+        if len(children) == 1:
+            value: Any | TermNode = children[0]
             if not isinstance(value, TermNode):
                 raise SyntaxError(
                     f"Expected TermNode at line {self.line}, col {self.col}\n"
                 )
             return value.exec()
 
-        op: str | None = None
+        op: Any | None = None
 
-        right: Any | TermNode = self.children.pop(0)
+        right: Any | TermNode = children.pop(0)
         if not isinstance(right, TermNode):
             raise SyntaxError(f"Expected Term at line {self.line}, col {self.col}\n")
         right_val: Val = right.exec()
 
-        while self.children:
-            if not self.children:
+        while children:
+            if not children:
                 raise SyntaxError(
                     f"Expected operator with precidence 1 at line {self.line}, col {self.col}\n"
                 )
-            op = self.children.pop(0)
+            op = children.pop(0)
             if op not in [literals.OP_ADD, literals.OP_SUB]:
                 raise SyntaxError(
                     f"Expected operator with precidence 1 at line {self.line}, col {self.col}\n"
                 )
-            left: Any | TermNode = self.children.pop(0)
+            left: Any | TermNode = children.pop(0)
             if not isinstance(left, TermNode):
                 raise SyntaxError(
                     f"Expected Term at line {self.line}, col {self.col}\n"
@@ -381,13 +719,19 @@ class ExprNode(Node):
 
 
 class VarDefNode(Node):
-    def __init__(self, node: dict[str, Any], varspace: dict[str, Val]):
+    def __init__(
+        self,
+        node: dict[str, Any],
+        varspace: dict[str, Val],
+        callspace: dict[str, Callable],
+    ):
         self.children = node["children"]
         for ii, child in enumerate(self.children):
             child: dict[str, Any] | Any
-            self.children[ii] = Node.new_node(child, varspace)
+            self.children[ii] = Node.new_node(child, varspace, callspace)
         self.col = node["col"]
         self.varspace = varspace
+        self.callspace = callspace
         self.line = node["line"]
 
     def _exec_explicit(self):
@@ -440,6 +784,8 @@ class VarDefNode(Node):
             )
 
         self.varspace[var_name] = val
+        if var_name in self.callspace:
+            del self.callspace[var_name]
 
         return val
 
@@ -475,6 +821,8 @@ class VarDefNode(Node):
             )
 
         self.varspace[var_name] = var_val
+        if var_name in self.callspace:
+            del self.callspace[var_name]
 
         return var_val
 
@@ -492,13 +840,19 @@ class VarDefNode(Node):
 
 
 class VarSetNode(Node):
-    def __init__(self, node: dict[str, Any], varspace: dict[str, Val]):
+    def __init__(
+        self,
+        node: dict[str, Any],
+        varspace: dict[str, Val],
+        callspace: dict[str, Callable],
+    ):
         self.children = node["children"]
         for ii, child in enumerate(self.children):
             child: dict[str, Any] | Any
-            self.children[ii] = Node.new_node(child, varspace)
+            self.children[ii] = Node.new_node(child, varspace, callspace)
         self.col = node["col"]
         self.varspace = varspace
+        self.callspace = callspace
         self.line = node["line"]
 
     def exec(self):
@@ -541,13 +895,19 @@ class VarSetNode(Node):
 
 
 class EchoNode(Node):
-    def __init__(self, node: dict[str, Any], varspace: dict[str, Val]):
+    def __init__(
+        self,
+        node: dict[str, Any],
+        varspace: dict[str, Val],
+        callspace: dict[str, Callable],
+    ):
         self.children = node["children"]
         for ii, child in enumerate(self.children):
             child: dict[str, Any] | Any
-            self.children[ii] = Node.new_node(child, varspace)
+            self.children[ii] = Node.new_node(child, varspace, callspace)
         self.col = node["col"]
         self.varspace = varspace
+        self.callspace = callspace
         self.line = node["line"]
 
     def exec(self):
@@ -569,17 +929,15 @@ class EchoNode(Node):
 class Executor:
     def __init__(self):
         self.globals: dict[str, Val] = {}
+        self.callables: dict[str, Callable] = {}
 
     def exec(self, ast: list[dict[str, Any]]):
-        statements: list[Any] = []
+        rv = None
         for ast_node in ast:
-            node = Node.new_node(ast_node, self.globals)
+            node = Node.new_node(ast_node, self.globals, self.callables)
             if isinstance(node, str):
                 raise SyntaxError(f"{node} cannot be executed.")
             if node is not None:
-                statements.append(node.exec())
+                rv = node.exec()
 
-        if not statements:
-            return None
-
-        return statements[-1]
+        return rv

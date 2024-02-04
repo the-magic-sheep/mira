@@ -17,7 +17,7 @@ def main():
             return
 
         try:
-            print(executor.exec(parser.parse(line)).value)
+            print(executor.exec(parser.parse(line)))
         except (SyntaxError, pyparsing.exceptions.ParseBaseException) as e:
             print(e)
 

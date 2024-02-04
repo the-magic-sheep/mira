@@ -4,4 +4,6 @@ x = x ^ x
 
 y:int = x + 3
 
-echo x - y
+func: num(a: int, b: int) = 1. * a / b
+
+echo func(a=x, b=y)

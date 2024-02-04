@@ -74,8 +74,12 @@ class Parser:
         self.expr = pp.Forward()
         self.expr_list = pp.delimited_list(pp.Group(self.expr))
 
-        self.atom = (self.num | self.int | self.ident) | (
-            self.lparen + self.expr + self.rparen
+        self.call = pp.Forward()
+
+        self.atom = (
+            self.call
+            | (self.num | self.int | self.ident)
+            | (self.lparen + self.expr + self.rparen)
         )
         self.atom.add_parse_action(self.consume_atom)
 
@@ -89,6 +93,25 @@ class Parser:
         self.expr <<= self.term + pp.ZeroOrMore(self.op_prec[-3] + self.term)
         self.expr.add_parse_action(self.consume_expr)
 
+        self.paramlist = pp.ZeroOrMore(
+            self.ident + ":" + self.ident + ","
+        ) + pp.Optional(self.ident + ":" + self.ident + pp.Optional(","))
+        self.paramlist.add_parse_action(self.consume_paramlist)
+
+        self.callable = self.ident + "(" + pp.Optional(self.paramlist) + ")"
+        self.callable.add_parse_action(self.consume_callable)
+
+        self.callable_def = self.ident + ":" + (self.callable) + "=" + self.expr
+        self.callable_def.add_parse_action(self.consume_callable_def)
+
+        self.arglist = pp.ZeroOrMore(self.ident + "=" + self.expr + ",") + pp.Optional(
+            self.ident + "=" + self.expr + pp.Optional(",")
+        )
+        self.arglist.add_parse_action(self.consume_arglist)
+
+        self.call <<= self.ident + "(" + self.arglist + ")"
+        self.call.add_parse_action(self.consume_call)
+
         self.var_def = (self.ident + ":" + self.ident + "=" + self.expr) | (
             self.ident + ":" + "=" + self.expr
         )
@@ -101,7 +124,12 @@ class Parser:
         self.echo.add_parse_action(self.consume_echo)
 
         self.prog = pp.ZeroOrMore(
-            self.echo | self.var_def | self.var_set | self.expr | self.newline
+            self.echo
+            | self.callable_def
+            | self.var_def
+            | self.var_set
+            | self.expr
+            | self.newline
         )
 
         self.ast: list[dict[str, Any]] = []
@@ -123,6 +151,91 @@ class Parser:
         }
 
         self.line_count += 1
+        return new_ast
+
+    def consume_paramlist(
+        self,
+        input_str: str,
+        position: int = 0,
+        parse_result: pp.ParseResults | None = None,
+    ):
+        if parse_result is None:
+            parse_result = self.paramlist.parse_string(input_str, parse_all=True)
+
+        new_ast: dict[str, Any] = {
+            "col": compute_column(input_str, position),
+            "children": results_to_list(parse_result),
+            "type": "paramlist",
+            "line": self.line_count,
+        }
+        return new_ast
+
+    def consume_callable(
+        self,
+        input_str: str,
+        position: int = 0,
+        parse_result: pp.ParseResults | None = None,
+    ):
+        if parse_result is None:
+            parse_result = self.callable.parse_string(input_str, parse_all=True)
+
+        new_ast: dict[str, Any] = {
+            "col": compute_column(input_str, position),
+            "children": results_to_list(parse_result),
+            "type": "callable",
+            "line": self.line_count,
+        }
+        return new_ast
+
+    def consume_callable_def(
+        self,
+        input_str: str,
+        position: int = 0,
+        parse_result: pp.ParseResults | None = None,
+    ):
+        if parse_result is None:
+            parse_result = self.callable_def.parse_string(input_str, parse_all=True)
+
+        new_ast: dict[str, Any] = {
+            "col": compute_column(input_str, position),
+            "children": results_to_list(parse_result),
+            "type": "callable_def",
+            "line": self.line_count,
+        }
+        return new_ast
+
+    def consume_arglist(
+        self,
+        input_str: str,
+        position: int = 0,
+        parse_result: pp.ParseResults | None = None,
+    ):
+        if parse_result is None:
+            parse_result = self.arglist.parse_string(input_str, parse_all=True)
+
+        new_ast: dict[str, Any] = {
+            "col": compute_column(input_str, position),
+            "children": results_to_list(parse_result),
+            "type": "arglist",
+            "line": self.line_count,
+        }
+        return new_ast
+
+    def consume_call(
+        self,
+        input_str: str,
+        position: int = 0,
+        parse_result: pp.ParseResults | None = None,
+    ):
+        if parse_result is None:
+            parse_result = self.call.parse_string(input_str, parse_all=True)
+
+        new_ast: dict[str, Any] = {
+            "col": compute_column(input_str, position),
+            "children": results_to_list(parse_result),
+            "type": "call",
+            "line": self.line_count,
+        }
         return new_ast
 
     def consume_ident(

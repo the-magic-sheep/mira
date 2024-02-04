@@ -16,7 +16,11 @@ def main(args: argparse.Namespace):
 
     try:
         executor.exec(parser.parse(mira_file))
-    except (SyntaxError, pyparsing.exceptions.ParseBaseException) as e:
+    except pyparsing.exceptions.ParseBaseException as e:
+        explanation = e.explain()  # type: ignore
+        for line in explanation.split("\n")[:-2]:
+            print(line)
+    except SyntaxError as e:
         print(e)
 
 
